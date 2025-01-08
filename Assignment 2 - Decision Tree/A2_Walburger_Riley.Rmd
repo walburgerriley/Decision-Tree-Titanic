@@ -1,0 +1,289 @@
+---
+title: "A2_Walburger_Riley"
+author: "Riley Walburger"
+date: "2024-10-04"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 3
+  pdf_document:
+    toc: true
+    toc_depth: 3
+---
+## Load Data and Libraries
+
+```{r setup, echo=TRUE, results='hide', include=TRUE, message=FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(psych)
+library(RWeka) 
+library(dplyr)
+library(purrr)
+library(readr)
+library(ggplot2)
+library(gridExtra)
+library(grid)
+library(rpart)
+library(rpart.plot)
+library(caret)
+library(C50)
+library(rminer)
+library(rmarkdown)
+library(tictoc) 
+```
+
+```{r}
+CD_additional_balanced_1 <- read_csv("C:/Users/walbr/Desktop/U of U/1- Fall Semester 2024/Data Mining/Assignment 2 - Decision Tree/CD_additional_balanced-1.csv")
+
+
+#head(CD_additional_balanced_1)
+
+CD_factor <- CD_additional_balanced_1 %>%
+  mutate(across(c(job, marital, education, default, housing, loan, contact, month, day_of_week, poutcome, y), as.factor))
+
+head(CD_factor)
+```
+Now that we have loaded the data and can see the format of the data, we can now begin diving into what it looks like.
+
+## Target Variable
+
+The target variable is y which stands for yes or no to the question: Did the client subscribe to a certified term deposit(CD).
+
+```{r}
+CD_factor %>% pull(y) %>% table()
+
+CD_factor %>% pull(y) %>% table() %>% prop.table() %>% round(2)
+```
+There are exactly the same number of yes as no responses in this dataset. Which means that before any models you can randomly select anyone in this dataset and have a 50% chance of having them say yes to subscribing to a CD.
+
+## Data Preparation
+
+### Splitting the Data
+
+Next we are going to partition the data in order to test and train a model on this target variable. 
+
+```{r}
+set.seed(10)  # Setting seed for reproducibility
+
+# Split the data: 70% train, 30% test
+trainIndex <- createDataPartition(CD_factor$y, p = 0.7, 
+                                  list = FALSE)
+
+trainData <- CD_factor[trainIndex, ]  # 70% training data
+testData  <- CD_factor[-trainIndex, ] # 30% test data
+```
+
+I have first set a seed so that it can be reproducable and then allowed the computer to split the CD data into 70% training data and 30% testing data. This way we can make sure that after we create the model we can use it on the testing data(data that the model has never seen before) and make sure that it can still be accurate.
+
+### Train vs Test Data
+
+Lets now take a look at the Training and testing data to see what each set of data looks like after splitting them.
+
+#### Training Data
+
+```{r}
+CD_factor %>% pull(y) %>% table()
+
+CD_factor %>% pull(y) %>% table() %>% prop.table() %>% round(2)
+
+summary(trainData)
+```
+
+#### Test Data
+```{r}
+CD_factor %>% pull(y) %>% table()
+
+CD_factor %>% pull(y) %>% table() %>% prop.table() %>% round(2)
+
+summary(testData)
+```
+
+As we can see each data set is still perfectly half and half based on yes and no responses. That will be very simple for this test. This means that as long as we can predict better than a 50% chance we have gotten information gain. 
+
+## Training Decision Trees (All 7)
+
+```{r}
+# Create the model
+CD_model1 <- C5.0(formula = y ~ ., data = trainData, earlyStopping = FALSE, noGlobalPruning = FALSE, control = C5.0Control(CF = 0.97))
+
+CD_model2 <- C5.0(formula = y ~ ., data = trainData, earlyStopping = FALSE, noGlobalPruning = FALSE, control = C5.0Control(CF = 0.35))
+
+CD_model3 <- C5.0(formula = y ~ ., data = trainData, earlyStopping = FALSE, noGlobalPruning = FALSE, control = C5.0Control(CF = 0.12))
+
+CD_model4 <- C5.0(formula = y ~ ., data = trainData, earlyStopping = FALSE, noGlobalPruning = FALSE, control = C5.0Control(CF = 0.08))
+
+CD_model5 <- C5.0(formula = y ~ ., data = trainData, earlyStopping = FALSE, noGlobalPruning = FALSE, control = C5.0Control(CF = 0.04))
+
+CD_model6 <- C5.0(formula = y ~ ., data = trainData, earlyStopping = FALSE, noGlobalPruning = FALSE, control = C5.0Control(CF = 0.025))
+
+CD_model7 <- C5.0(formula = y ~ ., data = trainData, earlyStopping = FALSE, noGlobalPruning = FALSE, control = C5.0Control(CF = 0.001))
+
+
+CD_model7
+```
+
+In order to get a low tree size we have to have a very low confidence factor. We went with 0.001 to get under ten leaf nodes. 
+
+## Model Information
+
+In the order they were built and order of confidence level you can see below the model leaf sizes. 
+
+```{r}
+leaf_nodes_vector <- c(
+  CD_model1$size,
+  CD_model2$size,
+  CD_model3$size,
+  CD_model4$size,
+  CD_model5$size,
+  CD_model6$size,
+  CD_model7$size)
+
+leaf_nodes_vector
+```
+
+The most complex trees go really deep and splits the data into 292 groups. The least complex tree is the last one with only 9 leaf nodes.
+
+Below I will show the least complex one created to show how this is working. 
+
+```{r fig.height=8, fig.width=20}
+# Plot the model
+plot(CD_model7)
+
+```
+
+The plot shown above starts at the top and works its way down with each decision. So the very first decision is if the variable nr.employed is greater than 5076.2 and depending on the answer to that question it will go down each way of the tree. 
+So for example if for one row of data nr.employed = 6000 and duration = 500 then that instance it would go right on the first one based on 6000 > 5076.2 and then go right again because 500 > 451 on duration landing this instance in the far right bucket which seems to be an 80% chance of being a yes in our target variable. 
+
+## Predict and Test
+
+  The first thing we are doing in this section is using our models to create predictions. We are doing this twice for each model. Once on the training dataset and once on the test dataset. This will help us to see at what point we are starting to over fit our model. 
+  
+```{r}
+CD_model1_Predictions_Train <- predict(CD_model1, trainData)
+CD_model1_Predictions_Test <- predict(CD_model1, testData)
+
+CD_model2_Predictions_Train <- predict(CD_model2, trainData)
+CD_model2_Predictions_Test <- predict(CD_model2, testData)
+
+CD_model3_Predictions_Train <- predict(CD_model3, trainData)
+CD_model3_Predictions_Test <- predict(CD_model3, testData)
+
+CD_model4_Predictions_Train <- predict(CD_model4, trainData)
+CD_model4_Predictions_Test <- predict(CD_model4, testData)
+
+CD_model5_Predictions_Train <- predict(CD_model5, trainData)
+CD_model5_Predictions_Test <- predict(CD_model5, testData)
+
+CD_model6_Predictions_Train <- predict(CD_model6, trainData)
+CD_model6_Predictions_Test <- predict(CD_model6, testData)
+
+CD_model7_Predictions_Train <- predict(CD_model7, trainData)
+CD_model7_Predictions_Test <- predict(CD_model7, testData)
+
+```
+
+Now that we have our predictions we will use them to see how accurate each model was on the training and test datasets. 
+
+```{r}
+ metrics=c("F1","ACC","PRECISION","RECALL")
+
+cf_vector <- c(0.97, 0.35, 0.12, 0.08, 0.04, 0.025, 0.001)
+```
+
+### Confusion Matrix
+
+Though harder to read the confusion matrices give us the results of all models both test and train for you to look through. However the most understandable parts of what we are really getting from this is below in the grah and table of accuracies. 
+```{r}
+mmetric(trainData$y, CD_model1_Predictions_Train, metric="CONF")
+mmetric(testData$y, CD_model1_Predictions_Test, metric="CONF")
+
+mmetric(trainData$y, CD_model2_Predictions_Train, metric="CONF")
+mmetric(testData$y, CD_model2_Predictions_Test, metric="CONF")
+
+mmetric(trainData$y, CD_model3_Predictions_Train, metric="CONF")
+mmetric(testData$y, CD_model3_Predictions_Test, metric="CONF")
+
+mmetric(trainData$y, CD_model4_Predictions_Train, metric="CONF")
+mmetric(testData$y, CD_model4_Predictions_Test, metric="CONF")
+
+mmetric(trainData$y, CD_model5_Predictions_Train, metric="CONF")
+mmetric(testData$y, CD_model5_Predictions_Test, metric="CONF")
+
+mmetric(trainData$y, CD_model6_Predictions_Train, metric="CONF")
+mmetric(testData$y, CD_model6_Predictions_Test, metric="CONF")
+
+mmetric(trainData$y, CD_model7_Predictions_Train, metric="CONF")
+mmetric(testData$y, CD_model7_Predictions_Test, metric="CONF")
+```
+
+### Accuracy
+```{r}
+train_acc <- c(
+  mmetric(trainData$y, CD_model1_Predictions_Train, metric="ACC"),
+  mmetric(trainData$y, CD_model2_Predictions_Train, metric="ACC"),
+  mmetric(trainData$y, CD_model3_Predictions_Train, metric="ACC"),
+  mmetric(trainData$y, CD_model4_Predictions_Train, metric="ACC"),
+  mmetric(trainData$y, CD_model5_Predictions_Train, metric="ACC"),
+  mmetric(trainData$y, CD_model6_Predictions_Train, metric="ACC"),
+  mmetric(trainData$y, CD_model7_Predictions_Train, metric="ACC")
+)
+
+test_acc <- c(
+  mmetric(testData$y, CD_model1_Predictions_Test, metric="ACC"),
+  mmetric(testData$y, CD_model2_Predictions_Test, metric="ACC"),
+  mmetric(testData$y, CD_model3_Predictions_Test, metric="ACC"),
+  mmetric(testData$y, CD_model4_Predictions_Test, metric="ACC"),
+  mmetric(testData$y, CD_model5_Predictions_Test, metric="ACC"),
+  mmetric(testData$y, CD_model6_Predictions_Test, metric="ACC"),
+  mmetric(testData$y, CD_model7_Predictions_Test, metric="ACC")
+)
+
+
+acc_df_cf <- data.frame(train_acc,test_acc,cf_vector,leaf_nodes_vector)
+acc_df_cf 
+```
+
+
+## Feature Importance
+
+```{r}
+C5imp(CD_model1)
+C5imp(CD_model2)
+C5imp(CD_model3)
+C5imp(CD_model4)
+C5imp(CD_model5)
+C5imp(CD_model6)
+C5imp(CD_model7)
+
+```
+The top 4 features were duration, nr.employed, month and pdays in all except one model. The bottom 2 attributes were often poutcome and education. In some of the more intense models that seem to be slightly over fitting the data these could become important. 
+
+## Train vs Test Accuracy
+
+```{r}
+ggplot() + 
+  geom_line(aes(x=acc_df_cf$leaf_nodes_vector,y=acc_df_cf$train_acc,color='Train Accuracy')) +
+  geom_line(aes(x=acc_df_cf$leaf_nodes_vector,y=acc_df_cf$test_acc,color='Test Accuracy')) +
+  scale_color_manual(values = c("Train Accuracy" = "red", "Test Accuracy" = "blue")) +
+  ggtitle("Titanic Tree Accuracy in Test and Train by number of leaf nodes.") + 
+  xlab('Tree Complexity (Leaf Nodes)') +
+  ylab('Accuracy') +
+  ylim(75,100) +
+  geom_vline(xintercept = 50) +
+  geom_text(aes(x=30,y=85),label='<- Underfitted') +
+  geom_text(aes(x=120,y=95),label='Increasingly Overfitted ->')
+```
+
+As we can see in the models made above we can overfit the data we have and thus reduce our accuracy in Test or live data. This is why we have to be careful with our CF. 
+
+The best model on the train data was the most complex model with a CF of .97. It had 292 leaf nodes and made a ton of decisions based on the data. 
+
+Our best performing model had a CF of .12 and had 50 leaf nodes. Its training accuracy was about 89% with others being into the 90s. However it had the highest test accuracy out of all of them which is more important. 
+
+I think that the Train test score is much less important to the Test accuracy. The train gets us a good idea that the model is working however the test is where we make sure that we aren't going to far and ruining the model with data outside of the what we are training the model on. 
+
+In conclusion because everything under about 50 leaf nodes is underfitted and everything over that seems to be overfitted to the data the model I would choose is the one with a CF of .12. It is the one that can predict the very best on live data. 
+
+
+
